@@ -1,12 +1,17 @@
 
 --Consulta #1
-
-SELECT ec.Nombre AS Estudio, ec.Pais_Origen, COUNT(df.ID_Producto) AS Juegos_Vendidos, SUM(df.Precio_Venta_Historico) AS Ingreso_Total, dbo.fn_clasificar_ingreso(SUM(df.Precio_Venta_Historico)) AS Clasificacion
+-- Clasificación de Estudios por Facturación
+SELECT 
+    ec.Nombre AS Estudio, 
+    ec.Pais_Origen, 
+    COUNT(DISTINCT df.ID_Producto) AS Juegos_Vendidos, 
+    SUM(df.Precio_Venta_Historico) AS Ingreso_Total, 
+    dbo.fn_clasificar_ingreso(SUM(df.Precio_Venta_Historico)) AS Clasificacion
 FROM Empresa_Corporativa ec
 JOIN Juego_Base jb ON jb.ID_Estudio_Dev = ec.ID_Empresa
 JOIN Detalle_Factura df ON df.ID_Producto = jb.ID_Producto
 JOIN Factura f ON f.ID_Factura = df.ID_Factura
-WHERE f.Fecha_Hora_Emision >= DATEADD(month, -1, GETDATE())
+WHERE f.Fecha_Hora_Emision >= DATEADD(MONTH, -1, CAST(GETDATE() AS DATE))
 GROUP BY ec.ID_Empresa, ec.Nombre, ec.Pais_Origen
 ORDER BY Ingreso_Total DESC;
 
