@@ -33,16 +33,15 @@ WHERE Puntaje_Popularidad = (SELECT MAX(Puntaje_Popularidad)FROM ProductoConPunt
 
 
 --Consulta #3
-
-WITH Extraer_Dominio AS(
-SELECT SUBSTRING(Correo,CHARINDEX('@',Correo),15) as Dominio
-FROM Usuario
+WITH Extraer_Dominio AS (
+    SELECT SUBSTRING(Correo, CHARINDEX('@', Correo) + 1, LEN(Correo)) AS Dominio
+    FROM Usuario
+    WHERE CHARINDEX('@', Correo) > 0
 )
-
-SELECT Dominio , COUNT(*) as Cantidad_Usuarios
+SELECT Dominio, COUNT(*) AS Cantidad_Usuarios
 FROM Extraer_Dominio
 GROUP BY Dominio
-HAVING COUNT(*)>10
+HAVING COUNT(*) > 10;
 
 --Consulta #4
 WITH ComprasOrdenadas AS (
@@ -76,38 +75,57 @@ ORDER BY ps.Dias_Entre_Compras;
 
 
 --Consulta #5
-
-SELECT jb.ID_Estudio_Dev as Estudio, COUNT(jb.ID_Producto) as Cantidad_Juegos, CASE WHEN SUM(pd.Tamano_GB) >= 1024 THEN 
-                															   CAST(CAST(ROUND(SUM(pd.Tamano_GB) / 1024.0, 2) AS DECIMAL(10,1)) AS VARCHAR(20)) + ' TB'
-            																   ELSE CAST(CAST(ROUND(SUM(pd.Tamano_GB), 2) AS DECIMAL(10,1)) AS VARCHAR(20)) + ' GB' END AS Peso_Total
+SELECT 
+    ec.Nombre AS Estudio, 
+    COUNT(jb.ID_Producto) AS Cantidad_Juegos, 
+    CASE 
+        WHEN SUM(pd.Tamano_GB) >= 1024 THEN 
+            CAST(CAST(ROUND(SUM(pd.Tamano_GB) / 1024.0, 1) AS DECIMAL(10,1)) AS VARCHAR(20)) + ' TB'
+        ELSE 
+            CAST(CAST(ROUND(SUM(pd.Tamano_GB), 1) AS DECIMAL(10,1)) AS VARCHAR(20)) + ' GB' 
+    END AS Peso_Total
 FROM Producto_Digital pd
 JOIN Juego_Base jb ON pd.ID_Producto = jb.ID_Producto 
 JOIN Empresa_Corporativa ec ON jb.ID_Estudio_Dev = ec.ID_Empresa 
-GROUP BY jb.ID_Estudio_Dev 
+GROUP BY ec.ID_Empresa, ec.Nombre;
 
 --Consulta #6
-
-WITH VentasNetasPorPais AS (
-SELECT u.Pais_Residencia AS Pais, SUM(ISNULL(f.Total_Pagado, 0) - ISNULL(r.Monto_Reembolsado, 0)) AS Total_Neto
+WITH Ventas AS (
+    SELECT u.Pais_Residencia AS Pais, SUM(f.Total_Pagado) AS Total_Ventas
     FROM Usuario u
-    LEFT JOIN Factura f ON u.ID_Usuario = f.ID_Usuario
-    LEFT JOIN Reembolso r ON f.ID_Factura = r.ID_Factura
+    JOIN Factura f ON u.ID_Usuario = f.ID_Usuario
+    GROUP BY u.Pais_Residencia
+),
+Reembolsos AS (
+    SELECT u.Pais_Residencia AS Pais, SUM(r.Monto_Reembolsado) AS Total_Reembolsos
+    FROM Usuario u
+    JOIN Factura f ON u.ID_Usuario = f.ID_Usuario
+    JOIN Reembolso r ON r.ID_Factura = f.ID_Factura
     GROUP BY u.Pais_Residencia
 )
-SELECT Pais, Total_Neto, FORMAT((Total_Neto * 100.0) / NULLIF(SUM(Total_Neto) OVER(), 0), 'N1') + '%' AS Share
-FROM VentasNetasPorPais;
+SELECT 
+    v.Pais, 
+    ISNULL(v.Total_Ventas, 0) - ISNULL(r.Total_Reembolsos, 0) AS Total_Neto, 
+    CAST(CAST(ROUND(((ISNULL(v.Total_Ventas, 0) - ISNULL(r.Total_Reembolsos, 0)) * 100.0) / 
+        NULLIF(SUM(ISNULL(v.Total_Ventas, 0) - ISNULL(r.Total_Reembolsos, 0)) OVER(), 0), 1) AS DECIMAL(10,1)) AS VARCHAR(10)) + '%' AS Share
+FROM Ventas v
+LEFT JOIN Reembolsos r ON r.Pais = v.Pais;
 
 --Consulta #7
-
-SELECT u.Nickname , SUM(f.Total_Pagado ) as Gasto_Total_Historico
-FROM Factura f 
-JOIN Usuario u ON f.ID_Usuario=u.ID_Usuario
-JOIN Biblioteca b ON b.ID_Usuario = u.ID_Usuario 
-JOIN Juego_Categoria jc ON jc.ID_Producto = b.ID_Producto 
-JOIN Categoria_Oficial co ON jc.ID_Categoria = co.ID_Categoria 
+SELECT 
+    u.Nickname, 
+    SUM(df.Precio_Venta_Historico) AS Gasto_Total_Historico
+FROM Usuario u
+JOIN Biblioteca b ON b.ID_Usuario = u.ID_Usuario
+JOIN Juego_Categoria jc ON jc.ID_Producto = b.ID_Producto
+JOIN Categoria_Oficial co ON co.ID_Categoria = jc.ID_Categoria
+JOIN Detalle_Factura df ON df.ID_Producto = b.ID_Producto
+JOIN Factura f ON f.ID_Factura = df.ID_Factura AND f.ID_Usuario = u.ID_Usuario
 WHERE co.Nombre_Categoria IN ('Estrategia', 'Terror')
-GROUP BY u.ID_Usuario , u.Nickname 
-HAVING SUM(f.Total_Pagado )>100.00 AND COUNT(DISTINCT co.Nombre_Categoria)=2
+GROUP BY u.ID_Usuario, u.Nickname
+HAVING SUM(df.Precio_Venta_Historico) > 100.00
+   AND COUNT(DISTINCT CASE WHEN co.Nombre_Categoria = 'Estrategia' THEN 1 END) > 0
+   AND COUNT(DISTINCT CASE WHEN co.Nombre_Categoria = 'Terror' THEN 1 END) > 0;
 
 --Consulta #8
 WITH Agrupar_Generaciones AS(
@@ -172,26 +190,29 @@ HAVING COUNT(r.ID_Resena) >= 20
 ORDER BY Puntaje_Reputacion DESC;
 
 --Consulta #11
-
-SELECT u.Nickname, b.Fecha_Ultima_Sesion, COUNT(b.ID_Producto) as Juegos_En_Biblioteca
+SELECT 
+    u.Nickname, 
+    MAX(b.Fecha_Ultima_Sesion) AS Fecha_Ultima_Sesion, 
+    COUNT(b.ID_Producto) AS Juegos_En_Biblioteca
 FROM Usuario u
-JOIN Biblioteca b ON u.ID_Usuario=b.ID_Usuario
+JOIN Biblioteca b ON u.ID_Usuario = b.ID_Usuario
 WHERE u.ID_Usuario NOT IN (SELECT DISTINCT ID_Usuario FROM Resena WHERE ID_Usuario IS NOT NULL)
   AND u.ID_Usuario NOT IN (SELECT DISTINCT ID_Usuario FROM Desbloqueo_Logro)
-GROUP BY u.ID_Usuario, u.Nickname, b.Fecha_Ultima_Sesion
+GROUP BY u.ID_Usuario, u.Nickname;
 
 --Consulta #12
-
-SELECT TOP 3 ec.Nombre_Etiqueta, SUM(pe.Cantidad_Votos ) as Votos_Totales, COUNT(pe.ID_Producto) as Productos_Asociados
+SELECT TOP 3 
+    ec.Nombre_Etiqueta, 
+    SUM(pe.Cantidad_Votos) AS Votos_Totales, 
+    COUNT(DISTINCT pe.ID_Producto) AS Productos_Asociados
 FROM Producto_Digital pd
-JOIN Producto_Etiqueta pe ON pe.ID_Producto=pd.ID_Producto
-JOIN Etiqueta_Comunidad ec ON ec.ID_Etiqueta=pe.ID_Etiqueta
-WHERE YEAR(pd.Fecha_Lanzamiento)=2026 
+JOIN Producto_Etiqueta pe ON pe.ID_Producto = pd.ID_Producto
+JOIN Etiqueta_Comunidad ec ON ec.ID_Etiqueta = pe.ID_Etiqueta
+WHERE pd.Fecha_Lanzamiento >= DATEADD(YEAR, -1, CAST(GETDATE() AS DATE))
 GROUP BY ec.ID_Etiqueta, ec.Nombre_Etiqueta
-ORDER BY ec.Nombre_Etiqueta ASC 
+ORDER BY Votos_Totales DESC;
 
 --Consulta #13
-
 SELECT u.Nickname, pd.Titulo as Titulo_Juego, COUNT(ID_Logro) as Total_Logros
 FROM Usuario u 
 JOIN Desbloqueo_Logro dl ON dl.ID_Usuario=u.ID_Usuario
@@ -336,15 +357,23 @@ HAVING COUNT(DISTINCT amigo.ID_Usuario) >= 2
 ORDER BY Amigos_Con_Juego DESC
 
 --Consulta #17
-
-SELECT pd.Titulo, pd.Precio_Base_Actual, COUNT(si.ID_Idioma) as Idiomas_Soportados, COUNT(df.ID_Producto) as Ventas_Full_Price
+SELECT 
+    pd.Titulo, 
+    pd.Precio_Base_Actual, 
+    COUNT(DISTINCT si.ID_Idioma) AS Idiomas_Soportados, 
+    COUNT(df.ID_Producto) AS Ventas_Full_Price
 FROM Producto_Digital pd
-JOIN Juego_Base jb ON jb.ID_Producto=pd.ID_Producto
-JOIN Detalle_Factura df ON df.ID_Producto=pd.ID_Producto
-JOIN Soporte_Idioma si ON si.ID_Producto=pd.ID_Producto
-GROUP BY pd.ID_Producto, pd.Titulo
-HAVING pd.Precio_Base_Actual>(SELECT AVG(pd.Precio_Base_Actual) as Promedio_general FROM Producto_Digital pd) AND (COUNT( DISTINCT df.ID_Producto)>50 AND df.Descuento_Aplicado_Pct=0) AND COUNT(DISTINCT si.ID_Idioma)>4
-
+JOIN Juego_Base jb ON jb.ID_Producto = pd.ID_Producto
+JOIN Detalle_Factura df ON df.ID_Producto = pd.ID_Producto AND df.Descuento_Aplicado_Pct = 0
+JOIN Soporte_Idioma si ON si.ID_Producto = pd.ID_Producto
+WHERE pd.Precio_Base_Actual > (
+    SELECT AVG(CAST(Precio_Base_Actual AS DECIMAL(20,2))) 
+    FROM Producto_Digital 
+    WHERE Tipo_Producto = 'Juego_Base'
+)
+GROUP BY pd.ID_Producto, pd.Titulo, pd.Precio_Base_Actual
+HAVING COUNT(df.ID_Producto) > 50
+   AND COUNT(DISTINCT si.ID_Idioma) >= 4;
     --Consulta #18
 WITH Jerarquia AS (
     -- Cima de la jerarquía (empresas que son matriz de alguien)
