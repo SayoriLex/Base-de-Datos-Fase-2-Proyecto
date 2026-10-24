@@ -60,7 +60,6 @@ BEGIN
 
     RETURN ISNULL(@PrecioEfectivo, 0);
 END;
-GO
 
 -- 1.3 fn_clasificar_ingreso (@monto) -> Retorna 'AAA', 'Consolidado' o 'Indie'
 CREATE OR ALTER FUNCTION fn_clasificar_ingreso (@monto DECIMAL(20,2))
@@ -72,7 +71,7 @@ BEGIN
 
     IF @monto > 10000.00
         SET @Clasificacion = 'AAA';
-    ELSE IF @monto BETWEEN 2000.00 AND 10000.00
+    ELSE IF @monto >= 2000.00          -- ← cambio clave (antes era BETWEEN)
         SET @Clasificacion = 'Consolidado';
     ELSE
         SET @Clasificacion = 'Indie';
